@@ -5,15 +5,19 @@ import os
 import uuid
 from typing import Dict, Optional
 from server.protocol import encode_message, decode_message, MessageType, ProtocolMessage
+from server.env_loader import load_dotenv_file
 from server.tls import create_client_ssl_context
+
+
+load_dotenv_file()
 
 class ChatClient:
     """
     Simple CLI client for interacting with the TCP chat server.
     """
-    def __init__(self, host: str = "127.0.0.1", port: int = 8888) -> None:
-        self.host = host
-        self.port = port
+    def __init__(self, host: str | None = None, port: int | None = None) -> None:
+        self.host = host or os.getenv("CHAT_SERVER_HOST", "localhost")
+        self.port = int(port or os.getenv("CHAT_SERVER_PORT", "8888"))
         self.reader: asyncio.StreamReader
         self.writer: asyncio.StreamWriter
         self.username: Optional[str] = None
@@ -27,7 +31,7 @@ class ChatClient:
                 self.host,
                 self.port,
                 ssl=ssl_context,
-                server_hostname="localhost",
+                server_hostname=self.host,
             )
             print(f"Connected to {self.host}:{self.port}")
         except ConnectionRefusedError:

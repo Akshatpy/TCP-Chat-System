@@ -146,7 +146,7 @@
       ws.onopen = () => log("[WS] Connected to bridge.");
       ws.onclose = () => log("[WS] Disconnected.");
 
-      ws.onmessage = (ev) => {
+      ws.onmessage = async (ev) => {
         try {
           const msg = JSON.parse(ev.data);
           if (msg.type === "MSG") {

@@ -7,6 +7,11 @@ from pymongo.database import Database
 import bcrypt
 import datetime
 
+from .env_loader import load_dotenv_file
+
+
+load_dotenv_file()
+
 
 class Database:
     """

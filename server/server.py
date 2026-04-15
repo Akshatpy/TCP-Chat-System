@@ -3,10 +3,14 @@ import os
 from typing import Dict
 
 from .db import Database
+from .env_loader import load_dotenv_file
 from .room_manager import RoomManager
 from .file_transfer import FileTransferManager
 from .client_handler import ClientSession
 from .tls import create_server_ssl_context
+
+
+load_dotenv_file()
 
 
 class ChatServer:

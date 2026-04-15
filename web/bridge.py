@@ -1,9 +1,14 @@
 import asyncio
+import os
 import json
 import websockets
 from server.protocol import encode_message, decode_message, ProtocolMessage
 from server.protocol import MessageType
+from server.env_loader import load_dotenv_file
 from server.tls import create_client_ssl_context
+
+
+load_dotenv_file()
 
 
 async def tcp_bridge_handler(websocket: websockets.WebSocketServerProtocol, path: str) -> None:  # type: ignore[override]
@@ -13,10 +18,10 @@ async def tcp_bridge_handler(websocket: websockets.WebSocketServerProtocol, path
     """
     ssl_context = create_client_ssl_context()
     reader, writer = await asyncio.open_connection(
-        "127.0.0.1",
-        8888,
+        os.getenv("CHAT_SERVER_HOST", "127.0.0.1"),
+        int(os.getenv("CHAT_SERVER_PORT", "8888")),
         ssl=ssl_context,
-        server_hostname="localhost",
+        server_hostname=os.getenv("CHAT_SERVER_HOST", "127.0.0.1"),
     )
 
     async def ws_to_tcp() -> None:
