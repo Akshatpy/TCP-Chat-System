@@ -1,0 +1,8 @@
+__pycache__/
+*.pyc
+.env
+.env.*
+server.key
+server.crt
+client_downloads/
+data/files/

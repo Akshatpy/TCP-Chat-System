@@ -1,0 +1,6 @@
+asyncio
+websockets
+pymongo
+bcrypt
+cryptography
+

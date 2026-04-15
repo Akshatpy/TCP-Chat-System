@@ -1,0 +1,327 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Secure Multi-Room Chat</title>
+    <style>
+      body {
+        font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        margin: 0;
+        display: flex;
+        height: 100vh;
+        background: #0f172a;
+        color: #e5e7eb;
+      }
+      #sidebar {
+        width: 260px;
+        background: #020617;
+        padding: 16px;
+        box-sizing: border-box;
+        border-right: 1px solid #1f2937;
+      }
+      #main {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+      }
+      #messages {
+        flex: 1;
+        padding: 16px;
+        overflow-y: auto;
+      }
+      #input {
+        display: flex;
+        padding: 12px 16px;
+        gap: 8px;
+        border-top: 1px solid #1f2937;
+        background: #020617;
+      }
+      input,
+      button {
+        border-radius: 6px;
+        border: 1px solid #4b5563;
+        padding: 6px 8px;
+        background: #020617;
+        color: #e5e7eb;
+      }
+      input:focus {
+        outline: 2px solid #3b82f6;
+        border-color: transparent;
+      }
+      button {
+        cursor: pointer;
+        background: #3b82f6;
+        border-color: #3b82f6;
+      }
+      button:hover:not(:disabled) {
+        background: #2563eb;
+        border-color: #2563eb;
+      }
+      button:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
+      .msg {
+        margin-bottom: 4px;
+      }
+      .meta {
+        font-size: 12px;
+        color: #9ca3af;
+      }
+      #login {
+        margin-bottom: 16px;
+        border-bottom: 1px solid #1f2937;
+        padding-bottom: 12px;
+      }
+      .file-card {
+        margin: 8px 0;
+        padding: 8px 10px;
+        border: 1px solid #334155;
+        border-radius: 8px;
+        background: rgba(15, 23, 42, 0.8);
+      }
+      .file-card a {
+        color: #93c5fd;
+      }
+      .file-preview {
+        margin-top: 8px;
+        padding: 8px;
+        border-radius: 6px;
+        background: #0f172a;
+        border: 1px solid #1e293b;
+        white-space: pre-wrap;
+        word-break: break-word;
+        max-height: 200px;
+        overflow: auto;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-size: 12px;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="sidebar">
+      <div id="login">
+        <h3>Auth</h3>
+        <input id="username" placeholder="Username" /><br /><br />
+        <input id="password" type="password" placeholder="Password" /><br /><br />
+        <button id="loginBtn">Login</button>
+        <button id="registerBtn">Register</button>
+        <div id="authStatus" class="meta"></div>
+      </div>
+      <div id="adminPanel" style="display: none; margin-bottom: 16px; border-bottom: 1px solid #1f2937; padding-bottom: 12px;">
+        <h3>Admin Panel</h3>
+        <input id="kickRoom" placeholder="Room ID" style="width: 80px" />
+        <input id="kickUser" placeholder="Username" style="width: 80px" />
+        <button id="kickBtn">Kick User</button>
+      </div>
+      <div>
+        <h3>Rooms</h3>
+        <input id="roomName" placeholder="room name" />
+        <button id="joinRoomBtn" disabled>Join</button>
+        <div id="currentRoom" class="meta"></div>
+      </div>
+    </div>
+    <div id="main">
+      <div id="messages"></div>
+      <div id="input">
+        <input id="text" placeholder="Type a message" style="flex: 1" />
+        <input id="pmUser" placeholder="PM user (optional)" style="width: 140px" />
+        <button id="sendBtn" disabled>Send</button>
+      </div>
+    </div>
+    <script>
+      const ws = new WebSocket("ws://127.0.0.1:8765");
+      let currentRoom = null;
+      const incomingFiles = new Map();
+
+      const messagesEl = document.getElementById("messages");
+      function log(line) {
+        const div = document.createElement("div");
+        div.className = "msg";
+        div.textContent = line;
+        messagesEl.appendChild(div);
+        messagesEl.scrollTop = messagesEl.scrollHeight;
+      }
+
+      ws.onopen = () => log("[WS] Connected to bridge.");
+      ws.onclose = () => log("[WS] Disconnected.");
+
+      ws.onmessage = (ev) => {
+        try {
+          const msg = JSON.parse(ev.data);
+          if (msg.type === "MSG") {
+            log(`[${msg.payload.room}:${msg.payload.sequence_number}] ${msg.payload.sender}: ${msg.payload.content}`);
+          } else if (msg.type === "PMSG") {
+            log(`[PM] ${msg.payload.sender} -> ${msg.payload.receiver}: ${msg.payload.content}`);
+          } else if (msg.type === "SYSTEM") {
+            log(`[SYSTEM] ${msg.payload.message}`);
+          } else if (msg.type === "AUTH_FAIL") {
+            const authStatus = document.getElementById("authStatus");
+            authStatus.textContent = "Auth Failed: " + msg.payload.error;
+            authStatus.style.color = "#ef4444";
+            log(`[AUTH FAIL] ${msg.payload.error}`);
+          } else if (msg.type === "AUTH_OK") {
+            log(`[AUTH] Welcome ${msg.payload.username}`);
+            const authStatus = document.getElementById("authStatus");
+            authStatus.textContent = "Logged in as " + msg.payload.username;
+            authStatus.style.color = "#10b981";
+            document.getElementById("joinRoomBtn").disabled = false;
+            document.getElementById("sendBtn").disabled = false;
+            if (msg.payload.username === "admin") {
+              document.getElementById("adminPanel").style.display = "block";
+            }
+          } else if (msg.type === "FILE_CHUNK") {
+            let file_id = msg.payload.file_id;
+            let data_b64 = msg.payload.data_b64;
+            if (!incomingFiles.has(file_id)) {
+               incomingFiles.set(file_id, { chunks: [] });
+            }
+            let byteCharacters = atob(data_b64);
+            let byteNumbers = new Array(byteCharacters.length);
+            for (let i = 0; i < byteCharacters.length; i++) {
+                byteNumbers[i] = byteCharacters.charCodeAt(i);
+            }
+            incomingFiles.get(file_id).chunks.push(new Uint8Array(byteNumbers));
+          } else if (msg.type === "FILE_END") {
+            let file_id = msg.payload.file_id;
+            let entry = incomingFiles.get(file_id);
+            let blob = new Blob(entry ? entry.chunks : []);
+            let url = URL.createObjectURL(blob);
+            let downloadName = `${file_id}_${msg.payload.filename || "downloaded_file"}`;
+            let card = document.createElement("div");
+            card.className = "file-card";
+            const context = msg.payload.is_room
+              ? `Room ${msg.payload.room || msg.payload.target}`
+              : `PM from ${msg.payload.from || msg.payload.sender}`;
+            card.innerHTML = `
+              <div><strong>File received</strong></div>
+              <div class="meta">${context}</div>
+              <div><a href="${url}" download="${downloadName}">Download ${msg.payload.filename || "file"}</a></div>
+            `;
+
+            if ((msg.payload.filename || "").toLowerCase().endsWith(".txt") && blob.size > 0) {
+              try {
+                const text = await blob.text();
+                const preview = document.createElement("pre");
+                preview.className = "file-preview";
+                preview.textContent = text;
+                card.appendChild(preview);
+              } catch (error) {
+                const preview = document.createElement("div");
+                preview.className = "meta";
+                preview.textContent = "Preview unavailable.";
+                card.appendChild(preview);
+              }
+            } else if (blob.size === 0) {
+              const preview = document.createElement("div");
+              preview.className = "meta";
+              preview.textContent = "This file is empty.";
+              card.appendChild(preview);
+            }
+
+            messagesEl.appendChild(card);
+            messagesEl.scrollTop = messagesEl.scrollHeight;
+            const a = document.createElement("a");
+            a.href = url;
+            a.download = downloadName;
+            a.click();
+            setTimeout(() => URL.revokeObjectURL(url), 30000);
+            incomingFiles.delete(file_id);
+            log(`[FILE] Download ready: ${msg.payload.filename}`);
+          } else if (msg.type === "ERROR") {
+            log(`[ERROR] ${msg.payload.error}`);
+          }
+        } catch (e) {
+          console.error(e);
+        }
+      };
+
+      function send(msg) {
+        ws.send(JSON.stringify(msg));
+      }
+
+      document.getElementById("loginBtn").onclick = () => {
+        const username = document.getElementById("username").value.trim();
+        const password = document.getElementById("password").value.trim();
+        const authStatus = document.getElementById("authStatus");
+        if (!username || !password) {
+            authStatus.textContent = "Username & Password cannot be empty.";
+            authStatus.style.color = "#ef4444";
+            return;
+        }
+        send({
+          type: "AUTH",
+          payload: { action: "login", username, password },
+          msg_id: crypto.randomUUID(),
+        });
+        authStatus.textContent = "Sent auth...";
+        authStatus.style.color = "#9ca3af";
+      };
+
+      document.getElementById("registerBtn").onclick = () => {
+        const username = document.getElementById("username").value.trim();
+        const password = document.getElementById("password").value.trim();
+        const authStatus = document.getElementById("authStatus");
+        if (!username || !password) {
+            authStatus.textContent = "Username & Password cannot be empty.";
+            authStatus.style.color = "#ef4444";
+            return;
+        }
+        send({
+          type: "AUTH",
+          payload: { action: "register", username, password },
+          msg_id: crypto.randomUUID(),
+        });
+        authStatus.textContent = "Sent register...";
+        authStatus.style.color = "#9ca3af";
+      };
+
+      document.getElementById("kickBtn").onclick = () => {
+        const room = document.getElementById("kickRoom").value;
+        const user = document.getElementById("kickUser").value;
+        send({
+          type: "KICK",
+          payload: { room, user },
+          msg_id: crypto.randomUUID(),
+        });
+      };
+
+      document.getElementById("joinRoomBtn").onclick = () => {
+        const room = document.getElementById("roomName").value;
+        currentRoom = room;
+        document.getElementById("currentRoom").textContent = "Current room: " + room;
+        send({
+          type: "JOIN",
+          payload: { room },
+          msg_id: crypto.randomUUID(),
+        });
+      };
+
+      document.getElementById("sendBtn").onclick = () => {
+        const text = document.getElementById("text").value.trim();
+        const pmUser = document.getElementById("pmUser").value.trim();
+        if (!text) {
+          log("[SYSTEM] Cannot send empty message.");
+          return;
+        }
+        if (pmUser) {
+          send({
+            type: "PMSG",
+            payload: { to: pmUser, content: text },
+            msg_id: crypto.randomUUID(),
+          });
+        } else if (currentRoom) {
+          send({
+            type: "MSG",
+            payload: { room: currentRoom, content: text },
+            msg_id: crypto.randomUUID(),
+          });
+        } else {
+          log("Join a room first.");
+        }
+        document.getElementById("text").value = "";
+      };
+    </script>
+  </body>
+  </html>
+
