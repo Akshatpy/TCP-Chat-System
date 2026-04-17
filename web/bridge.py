@@ -2,6 +2,7 @@ import asyncio
 import os
 import json
 import websockets
+from typing import Any
 from server.protocol import encode_message, decode_message, ProtocolMessage
 from server.protocol import MessageType
 from server.env_loader import load_dotenv_file
@@ -11,18 +12,41 @@ from server.tls import create_client_ssl_context
 load_dotenv_file()
 
 
-async def tcp_bridge_handler(websocket: websockets.WebSocketServerProtocol, path: str) -> None:  # type: ignore[override]
+def _resolve_bridge_target_host() -> str:
+    # 0.0.0.0 is valid for server bind, but invalid as a client connect target.
+    host = os.getenv("CHAT_SERVER_HOST", "127.0.0.1")
+    if host in {"0.0.0.0", "::"}:
+        return "localhost"
+    return host
+
+
+async def tcp_bridge_handler(websocket: Any, path: str | None = None) -> None:  # type: ignore[override]
     """
     WebSocket <-> TCP bridge.
     Browser speaks the same JSON protocol; the bridge streams bytes to/from the TCP chat server.
     """
+    target_host = _resolve_bridge_target_host()
+    target_port = int(os.getenv("CHAT_SERVER_PORT", "8888"))
     ssl_context = create_client_ssl_context()
-    reader, writer = await asyncio.open_connection(
-        os.getenv("CHAT_SERVER_HOST", "127.0.0.1"),
-        int(os.getenv("CHAT_SERVER_PORT", "8888")),
-        ssl=ssl_context,
-        server_hostname=os.getenv("CHAT_SERVER_HOST", "127.0.0.1"),
-    )
+    try:
+        reader, writer = await asyncio.open_connection(
+            target_host,
+            target_port,
+            ssl=ssl_context,
+            server_hostname=target_host,
+        )
+    except Exception as e:
+        await websocket.send(
+            json.dumps(
+                {
+                    "type": "ERROR",
+                    "payload": {
+                        "error": f"Bridge could not connect to TCP server at {target_host}:{target_port}: {e}",
+                    },
+                }
+            )
+        )
+        return
 
     async def ws_to_tcp() -> None:
         async for text in websocket:
